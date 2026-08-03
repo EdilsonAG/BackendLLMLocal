@@ -11,76 +11,36 @@ import org.springframework.web.client.RestClientResponseException;
 
 import com.example.demo.dto.TicketRequest;
 
+import dev.langchain4j.agent.tool.P;
 import dev.langchain4j.agent.tool.Tool;
+import dev.langchain4j.agent.tool.ToolMemoryId;
 
 @Component
 public class AssistantTools {
 
+    
 
-    private final RestClient restClient;
-    private final String sapBaseUrl;
-    private final String sapClient;
+    @Tool("Cria um chamado no SAP. Só chame depois de ter coletado informações suficientes na conversa — nunca com base em uma descrição vaga como 'problema no SAP'")
+public String createTicket(
+        @ToolMemoryId String session,
+        @P("título curto e objetivo do problema, ex: 'Erro ao salvar transação VA01'") String description,
+        @P("descrição completa: transação/tela, mensagem de erro exata, desde quando ocorre, se afeta outros usuários") String longText,
+        @P("prioridade de 1 a 4, sendo 1 a mais urgente") String priority,
+        @P("tipo do chamado: 'incident' para erro/travamento, 'request' para solicitação") String type) {
 
-    public AssistantTools(RestClient restClient, @Value("${sap.base-url}") String sapBaseUrl,
-            @Value("${sap.client}") String sapClient){
-        this.restClient = restClient;
-        this.sapBaseUrl = sapBaseUrl;
-        this.sapClient = sapClient;
+    if (longText == null || longText.length() < 30) {
+        throw new IllegalArgumentException(
+                "Descrição insuficiente para abrir o chamado. Pergunte ao usuário: transação/tela onde ocorreu, " +
+                        "mensagem de erro exata, e desde quando o problema acontece.");
     }
 
-    @Tool("Cria o ticket com base no objeto TicketRequest no qual possui description longText priority type")
-    public String createTicket(String authHeader, String csrfToken, String cookies, TicketRequest input,
-            String session) {
-        boolean isIncident = input.type() == TicketRequest.TicketType.incident;
+    TicketCriadoHolder.set(new TicketInfo(description, longText, priority, type));
+    System.out.println("chegou aqui");
 
-        
+        return "Informações coletadas. O chamado será registrado no sistema.";
 
-        String url = isIncident
-                ? sapBaseUrl + "/AI_CRM_GW_CREATE_INCIDENT_SRV/IncidentSet?sap-client=" +
-                        sapClient
-                : sapBaseUrl +
-                        "/AI_CRM_GW_MYBUSI_REQUIRE_SRV/BusinessRequirementSet?sap-client=" +
-                        sapClient;
+}
 
-        System.out.println("antes do body");
-        Map<String, Object> body = isIncident
-                ? Map.of(
-                        "ProcessType", "ZMIN",
-                        "Description", input.description(),
-                        "LongText", input.longText(),
-                        "Priority", input.priority())
-                : Map.of(
-                        "Description", input.description(),
-                        "Priority", input.priority());
+public record TicketInfo(String description, String longText, String priority, String type) {}
 
-        System.out.println("depois do map body ja");
-        try {
-
-            String teste = restClient.post()
-                    .uri(url)
-                    .header(HttpHeaders.AUTHORIZATION, authHeader)
-                    .header("X-CSRF-Token", csrfToken)
-                    .header(HttpHeaders.COOKIE, cookies)
-                    .header(HttpHeaders.ACCEPT, MediaType.APPLICATION_JSON_VALUE)
-                    .body(body)
-                    .retrieve()
-                    .body(String.class);
-
-            System.out.println("RESPOSTA SAP: " + teste);
-
-            return teste;
-        } catch (RestClientResponseException e) {
-            e.printStackTrace();
-            throw new SapClientException(
-                    "Erro do SAP (status " + e.getStatusCode().value() + "): " +
-                            e.getResponseBodyAsString(),
-                    e);
-        }
-    }
-
-    public static class SapClientException extends RuntimeException {
-        public SapClientException(String message, Throwable cause) {
-            super(message, cause);
-        }
-    }
 }
